@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="de" class="dark"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hausiheft-Scanner</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+    <!-- Tesseract.js für lokalen Offline/Gratis-Fallback ohne API-Key -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: radial-gradient(circle at 15% 10%, rgba(99, 102, 241, 0.15), transparent 40%),
+                        radial-gradient(circle at 85% 80%, rgba(16, 185, 129, 0.12), transparent 40%),
+                        #090d16;
+            color: #f8fafc;
+            min-height: 100vh;
+        }
+
+        /* Laser Scan Animation */
+        @keyframes scanLaser {
+            0% { top: 4%; opacity: 0.9; }
+            50% { top: 92%; opacity: 1; }
+            100% { top: 4%; opacity: 0.9; }
+        }
+        .laser-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #38bdf8, #818cf8, #38bdf8, transparent);
+            box-shadow: 0 0 18px 4px rgba(56, 189, 248, 0.75);
+            animation: scanLaser 2.4s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        /* Glassmorphism Cards */
+        .glass-card {
+            background: rgba(17, 24, 39, 0.82);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+        }
+
+        /* Nicht-löschbarer Platzhalter für das Textfeld, wenn es leer ist */
+        #formattedOutputBox:empty:before {
+            content: attr(data-placeholder);
+            color: #64748b;
+            font-style: italic;
+            pointer-events: none;
+            display: block;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(99, 102, 241, 0.4);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(99, 102, 241, 0.7);
+        }
+    </style>
+</head>
+<body class="antialiased selection:bg-indigo-500 selection:text-white pb-28">
+
+    <!-- Schlichter Header: Nur kleines Symbol, "Hausiheft-Scanner" & Einstellungen -->
+    <header class="sticky top-0 z-40 glass-card border-b border-slate-800/80">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                    <i class="fa-solid fa-camera text-white text-base"></i>
+                </div>
+                <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-white">
+                    Hausiheft-Scanner
+                </h1>
+            </div>
+
+            <!-- Einstellungen -->
+            <button onclick="openModal('settingsModal')" class="p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 border border-slate-700 text-slate-300 hover:text-white transition" title="Einstellungen &amp; Fächer-Kürzel">
+                <i class="fa-solid fa-sliders"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Hauptbereich mit 3 übersichtlichen Abschnitten (umschaltbar über die Leiste unten) -->
+    <main class="max-w-3xl mx-auto px-4 sm:px-6 pt-6">
+
+        <!-- ABSCHNITT 1: HAUSIHEFT ERFASSEN -->
+        <section id="tab-scan" class="glass-card rounded-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-camera text-indigo-400"></i>
+                    <span>Hausiheft erfassen</span>
+                </h2>
+                <button id="btnRotateImage" onclick="rotateCurrentImage()" class="hidden px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition flex items-center gap-1.5" title="Foto um 90° drehen">
+                    <i class="fa-solid fa-rotate-right text-indigo-400"></i>
+                    <span>Bild drehen</span>
+                </button>
+            </div>
+
+            <!-- Buttons: Kamera & Foto wählen -->
+            <div class="grid grid-cols-2 gap-3">
+                <button id="btnToggleCamera" onclick="toggleCamera()" class="py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold text-sm shadow-lg shadow-indigo-600/25 transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-video"></i>
+                    <span id="cameraBtnText">Kamera starten</span>
+                </button>
+
+                <label for="fileUpload" class="cursor-pointer py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600/80 text-slate-100 font-bold text-sm transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-image text-emerald-400"></i>
+                    <span>Foto wählen</span>
+                    <input id="fileUpload" type="file" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+                </label>
+            </div>
+
+            <!-- Kamera- / Bild-Vorschau -->
+            <div id="dropZone" class="relative w-full min-h-[300px] sm:min-h-[360px] rounded-2xl bg-slate-950/90 border-2 border-dashed border-slate-700/80 hover:border-indigo-500/60 transition overflow-hidden flex flex-col items-center justify-center p-3">
+                
+                <!-- Laser-Linie beim Scannen -->
+                <div id="scanLaser" class="laser-line hidden"></div>
+
+                <!-- Leerer Start-Zustand -->
+                <div id="scannerPlaceholder" class="text-center p-6 space-y-3">
+                    <div class="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-400">
+                        <i class="fa-solid fa-book-open text-2xl text-indigo-400"></i>
+                    </div>
+                    <div class="space-y-1">
+                        <p class="text-sm font-semibold text-slate-200">Kein Foto ausgewählt</p>
+                        <p class="text-xs text-slate-400 max-w-xs mx-auto">
+                            Starte die Kamera oder wähle ein Foto von deinem Hausiheft aus.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Live Kamera-Stream -->
+                <video id="cameraStream" autoplay playsinline class="w-full h-full object-cover rounded-xl hidden"></video>
+
+                <!-- Aufgenommenes / Hochgeladenes Bild -->
+                <img id="imagePreview" alt="Hausiheft Vorschau" class="max-h-[380px] w-auto object-contain rounded-xl shadow-md hidden" src="">
+
+                <!-- Kamera-Auslöser -->
+                <div id="cameraControls" class="absolute bottom-4 inset-x-4 flex items-center justify-center gap-3 z-30 hidden">
+                    <button onclick="capturePhoto()" class="px-6 py-3 rounded-full bg-white text-slate-950 font-extrabold text-sm shadow-xl hover:scale-105 active:scale-95 transition flex items-center gap-2">
+                        <i class="fa-solid fa-circle-dot text-rose-600"></i>
+                        <span>Foto aufnehmen</span>
+                    </button>
+                    <button onclick="switchCameraFacing()" class="p-3 rounded-full bg-slate-900/90 text-white border border-slate-700 hover:bg-slate-800 transition" title="Kamera wechseln">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Scan-Button -->
+            <button id="btnScanNow" onclick="scanHomeworkImage()" disabled class="w-full py-4 px-5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-500/20 transition flex items-center justify-center gap-2.5">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>Hausaufgaben jetzt scannen</span>
+            </button>
+
+            <!-- Lade-Anzeige beim Scannen -->
+            <div id="scanStatusBox" class="rounded-xl p-3.5 bg-indigo-950/60 border border-indigo-500/40 text-xs sm:text-sm text-indigo-200 flex items-center gap-3 hidden">
+                <i class="fa-solid fa-circle-notch fa-spin text-indigo-400 text-base"></i>
+                <span id="scanStatusText">KI liest deine Handschrift und ordnet die Fächer zu...</span>
+            </div>
+        </section>
+
+        <!-- ABSCHNITT 2: FORMATIERTER HAUSI-TEXT -->
+        <section id="tab-text" class="glass-card rounded-2xl p-5 space-y-4 hidden">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-align-left text-emerald-400"></i>
+                        <span>Formatierter Hausi-Text</span>
+                    </h2>
+                    <p class="text-xs text-slate-400">
+                        Format: <strong class="text-white font-bold">Fach:</strong> Aufgabe (direkt anklickbar zum Bearbeiten)
+                    </p>
+                </div>
+
+                <!-- Aktions-Buttons -->
+                <div class="flex items-center gap-2">
+                    <button onclick="copyFormattedText()" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs sm:text-sm font-bold transition flex items-center gap-2 shadow-md shadow-indigo-600/20">
+                        <i class="fa-regular fa-copy"></i>
+                        <span>Text kopieren</span>
+                    </button>
+                    <button onclick="clearFormattedText()" class="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-xs transition" title="Textfeld leeren">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Editierbares Textfeld mit echtem CSS-Platzhalter (kein löschbarer Dummy-Text) -->
+            <div id="formattedOutputBox" contenteditable="true" oninput="syncEditedTextToTodos()" data-placeholder="Noch keine Hausaufgaben gescannt. Scanne zuerst dein Heft oder füge Aufgaben in der To-Do-Liste hinzu." class="w-full min-h-[220px] p-4 rounded-xl bg-slate-950/90 border border-slate-800 focus:border-indigo-500 focus:outline-none text-sm sm:text-base leading-relaxed text-slate-100 space-y-2"></div>
+
+            <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+                <span><i class="fa-solid fa-pen text-[10px] mr-1"></i>Tipp: Du kannst Aufgaben auch einzeln in der To-Do-Liste bearbeiten.</span>
+                <button onclick="switchTab('todo')" class="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+                    <span>Zur To-Do-Liste</span>
+                    <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- ABSCHNITT 3: TO-DO-LISTE -->
+        <section id="tab-todo" class="glass-card rounded-2xl p-5 space-y-4 hidden">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2.5">
+                    <h2 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-list-check text-indigo-400"></i>
+                        <span>To-Do-Liste</span>
+                    </h2>
+                    <span id="todoCounterBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold">0 offen</span>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button onclick="clearCompletedTodos()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition">
+                        Erledigte löschen
+                    </button>
+                    <button onclick="clearAllTodos()" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-rose-950/60 border border-slate-700 hover:border-rose-500/40 text-xs font-semibold text-slate-300 hover:text-rose-300 transition">
+                        Alle löschen
+                    </button>
+                </div>
+            </div>
+
+            <!-- Manuell Aufgabe hinzufügen -->
+            <form onsubmit="handleManualAdd(event)" class="flex flex-col sm:flex-row gap-2">
+                <input id="manualSubject" type="text" placeholder="Fach oder Kürzel (z.B. M, D, E)" required class="sm:w-44 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-bold text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <input id="manualTask" type="text" placeholder="Aufgabe eingeben (z.B. S. 12 Nr. 4)..." required class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                <button type="submit" class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition shrink-0 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>Hinzufügen</span>
+                </button>
+            </form>
+
+            <!-- Liste der Aufgaben -->
+            <div id="todoListContainer" class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1"></div>
+        </section>
+
+    </main>
+
+    <!-- UNTERE NAVIGATION-LEISTE (3 ABSCHNITTE) -->
+    <nav class="fixed bottom-0 inset-x-0 z-40 glass-card border-t border-slate-800/90">
+        <div class="max-w-3xl mx-auto px-3 py-2 grid grid-cols-3 gap-2">
+            <button id="nav-scan" onclick="switchTab('scan')" class="relative py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 bg-indigo-600 text-white shadow-lg shadow-indigo-600/25">
+                <i class="fa-solid fa-camera text-sm"></i>
+                <span>Hausiheft erfassen</span>
+            </button>
+
+            <button id="nav-text" onclick="switchTab('text')" class="relative py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60">
+                <i class="fa-solid fa-align-left text-sm"></i>
+                <span>Formatierter Hausi-Text</span>
+            </button>
+
+            <button id="nav-todo" onclick="switchTab('todo')" class="relative py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60">
+                <i class="fa-solid fa-list-check text-sm"></i>
+                <span>To-Do-Liste</span>
+                <span id="navTodoBadge" class="hidden px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold">0</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Unsichtbares Canvas für Kamerabild & Bilddrehung -->
+    <canvas id="helperCanvas" class="hidden" width="1280" height="720"></canvas>
+
+    <!-- Kurze Bestätigungs-Meldung (Toast) -->
+    <div id="toast" class="fixed bottom-20 right-4 left-4 sm:left-auto z-50 transform transition-all duration-300 translate-y-2 opacity-0 hidden">
+        <div class="px-4 py-3 rounded-xl bg-slate-900/95 border border-emerald-500/50 text-white shadow-2xl flex items-center justify-center sm:justify-start gap-3 text-sm font-semibold">
+            <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-base"></i>
+            <span id="toastMessage">2 Hausaufgaben erfolgreich gescannt!</span>
+        </div>
+    </div>
+
+    <!-- EINSTELLUNGEN MODAL (Fächer-Kürzel & KI-Modus) -->
+    <div id="settingsModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="glass-card max-w-lg w-full rounded-2xl border border-slate-700 p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-solid fa-sliders text-indigo-400 text-lg"></i>
+                    <h3 class="text-lg font-extrabold text-white">Einstellungen &amp; Fächer-Kürzel</h3>
+                </div>
+                <button onclick="closeModal('settingsModal')" class="text-slate-400 hover:text-white p-1.5">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Erkennungs-Modus -->
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-400">Texterkennung</label>
+                    <select id="engineSelect" onchange="saveSettings()" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-semibold text-white focus:outline-none focus:border-indigo-500">
+                        <option value="gemini">KI-Handschrifterkennung (Standard)</option>
+                        <option value="tesseract">Lokaler Offline-Scanner (ohne Internet/Key)</option>
+                    </select>
+                </div>
+
+                <!-- Fächer-Kürzel -->
+                <div class="space-y-1.5">
+                    <div class="flex items-center justify-between">
+                        <label for="subjectMapInput" class="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Fächer-Kürzel automatisch ausschreiben
+                        </label>
+                        <button onclick="resetSubjectMap()" class="text-[11px] text-indigo-400 hover:underline">Standard wiederherstellen</button>
+                    </div>
+                    <textarea id="subjectMapInput" rows="6" class="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"></textarea>
+                    <p class="text-[11px] text-slate-400">
+                        Du kannst hier jederzeit eigene Kürzel ergänzen (Format: <code>Kürzel = Fachname</code>).
+                    </p>
+                </div>
+
+                <!-- Optionaler API-Key für eigenes Hosting -->
+                <div class="space-y-1.5">
+                    <label for="userApiKeyInput" class="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Eigener Gemini API-Key (optional für GitHub Pages)
+                    </label>
+                    <input id="userApiKeyInput" type="password" placeholder="Nur bei eigenem Hosting nötig (AIzaSy...)" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-2">
+                <button onclick="saveSettings(true)" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition">
+                    Fertig
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // KONFIGURATION & UMFANGREICHE FÄCHER-KÜRZEL
+        // ==========================================
+        const apiKey = ""; 
+        let currentImageBase64 = null;
+        let currentImageMimeType = "image/png";
+        let mediaStream = null;
+        let usingRearCamera = true;
+        let activeTab = "scan";
+
+        // Alle typischen deutschen Schulfächer & Abkürzungen
+        const DEFAULT_SUBJECT_MAP = [
+            "M = Mathe", "Ma = Mathe", "Mat = Mathe", "Mathematik = Mathe",
+            "D = Deutsch", "De = Deutsch", "Deu = Deutsch",
+            "E = Englisch", "En = Englisch", "Eng = Englisch",
+            "Bio = Biologie", "B = Biologie", "Bi = Biologie",
+            "Ph = Physik", "Phy = Physik", "P = Physik",
+            "Ch = Chemie", "Che = Chemie", "C = Chemie",
+            "G = Geschichte", "Ge = Geschichte", "Ges = Geschichte", "Gesch = Geschichte",
+            "Ek = Erdkunde", "Geo = Geografie", "Gg = Geografie", "Erdk = Erdkunde",
+            "Po = Politik", "Pol = Politik", "PoWi = Politik & Wirtschaft", "WiPo = Wirtschaft & Politik",
+            "GK = Gemeinschaftskunde", "Sk = Sozialkunde", "Soz = Sozialkunde", "Sowi = Sozialwissenschaften",
+            "Wi = Wirtschaft", "WR = Wirtschaft & Recht", "BwR = Betriebswirtschaftslehre", "BWR = Betriebswirtschaftslehre",
+            "Ku = Kunst", "K = Kunst", "Bk = Bildende Kunst",
+            "Mu = Musik", "Mus = Musik",
+            "Sp = Sport", "Spo = Sport",
+            "Rel = Religion", "Reli = Religion", "R = Religion", "EvR = Evangelische Religion", "KR = Katholische Religion",
+            "Eth = Ethik", "Et = Ethik", "WN = Werte und Normen", "WuN = Werte und Normen", "PL = Praktische Philosophie", "Phi = Philosophie", "Phil = Philosophie",
+            "F = Französisch", "Fr = Französisch", "Fra = Französisch", "Franz = Französisch",
+            "L = Latein", "La = Latein", "Lat = Latein",
+            "S = Spanisch", "Spa = Spanisch", "Span = Spanisch",
+            "It = Italienisch", "Ru = Russisch", "Rus = Russisch",
+            "Inf = Informatik", "Info = Informatik", "If = Informatik", "IT = Informatik",
+            "NwT = Naturwissenschaft & Technik", "NWT = Naturwissenschaft & Technik", "NaWi = Naturwissenschaften", "NW = Naturwissenschaften",
+            "Tc = Technik", "Tech = Technik", "Wk = Werken",
+            "AES = Alltagskultur, Ernährung, Soziales", "HTW = Hauswirtschaft", "WAT = Wirtschaft-Arbeit-Technik",
+            "DS = Darstellendes Spiel", "Th = Theater", "Päd = Pädagogik", "Psy = Psychologie", "SF = Seminarfach"
+        ].join(", ");
+
+        // Startet komplett leer (keine ungewollten Beispiele beim Öffnen)
+        let todos = [];
+        let editingTodoId = null;
+
+        window.onload = function () {
+            loadStateFromStorage();
+            setupPasteAndDropListeners();
+            renderTodos();
+            updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+        };
+
+        // ==========================================
+        // NAVIGATION UNTEN (3 ABSCHNITTE)
+        // ==========================================
+        function switchTab(tabName) {
+            activeTab = tabName;
+            const tabs = ['scan', 'text', 'todo'];
+
+            tabs.forEach(t => {
+                const sectionEl = document.getElementById('tab-' + t);
+                const navBtn = document.getElementById('nav-' + t);
+
+                if (t === tabName) {
+                    sectionEl.classList.remove('hidden');
+                    navBtn.className = "relative py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 bg-indigo-600 text-white shadow-lg shadow-indigo-600/25";
+                } else {
+                    sectionEl.classList.add('hidden');
+                    navBtn.className = "relative py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 text-slate-400 hover:text-white hover:bg-slate-800/60";
+                }
+            });
+
+            // Kamera automatisch ausschalten, wenn man den Scan-Tab verlässt
+            if (tabName !== 'scan' && mediaStream) {
+                stopCamera();
+            }
+        }
+
+        // ==========================================
+        // SPEICHER & EINSTELLUNGEN
+        // ==========================================
+        function loadStateFromStorage() {
+            try {
+                const savedTodos = localStorage.getItem('hausiheft_todos_clean_v2');
+                if (savedTodos) {
+                    todos = JSON.parse(savedTodos);
+                } else {
+                    todos = [];
+                }
+
+                const savedEngine = localStorage.getItem('hausiheft_engine') || 'gemini';
+                document.getElementById('engineSelect').value = savedEngine;
+
+                const savedKey = localStorage.getItem('hausiheft_user_apikey') || '';
+                document.getElementById('userApiKeyInput').value = savedKey;
+
+                const savedMap = localStorage.getItem('hausiheft_subject_map_v2') || DEFAULT_SUBJECT_MAP;
+                document.getElementById('subjectMapInput').value = savedMap;
+            } catch (err) {
+                console.error("Storage load error:", err);
+            }
+        }
+
+        function saveSettings(closeAfter = false) {
+            const engine = document.getElementById('engineSelect').value;
+            const userKey = document.getElementById('userApiKeyInput').value.trim();
+            const subjectMap = document.getElementById('subjectMapInput').value.trim();
+
+            localStorage.setItem('hausiheft_engine', engine);
+            localStorage.setItem('hausiheft_user_apikey', userKey);
+            localStorage.setItem('hausiheft_subject_map_v2', subjectMap || DEFAULT_SUBJECT_MAP);
+
+            if (closeAfter) {
+                closeModal('settingsModal');
+                showToast("Einstellungen gespeichert!");
+            }
+        }
+
+        function resetSubjectMap() {
+            document.getElementById('subjectMapInput').value = DEFAULT_SUBJECT_MAP;
+            saveSettings(false);
+            showToast("Standard-Kürzel wiederhergestellt!");
+        }
+
+        // ==========================================
+        // KAMERA & FOTO-UPLOAD
+        // ==========================================
+        async function toggleCamera() {
+            if (mediaStream) {
+                stopCamera();
+                return;
+            }
+            await startCamera();
+        }
+
+        async function startCamera() {
+            try {
+                stopCamera();
+                const constraints = {
+                    video: {
+                        facingMode: usingRearCamera ? { ideal: "environment" } : "user",
+                        width: { ideal: 1600 },
+                        height: { ideal: 1200 }
+                    },
+                    audio: false
+                };
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                const videoEl = document.getElementById('cameraStream');
+                videoEl.srcObject = mediaStream;
+                videoEl.classList.remove('hidden');
+
+                document.getElementById('scannerPlaceholder').classList.add('hidden');
+                document.getElementById('imagePreview').classList.add('hidden');
+                document.getElementById('cameraControls').classList.remove('hidden');
+                document.getElementById('cameraBtnText').textContent = 'Kamera beenden';
+            } catch (err) {
+                showToast("Kamera nicht verfügbar. Bitte wähle ein Foto aus.", true);
+            }
+        }
+
+        function stopCamera() {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            const videoEl = document.getElementById('cameraStream');
+            videoEl.classList.add('hidden');
+            document.getElementById('cameraControls').classList.add('hidden');
+            document.getElementById('cameraBtnText').textContent = 'Kamera starten';
+
+            if (currentImageBase64) {
+                document.getElementById('imagePreview').classList.remove('hidden');
+            } else {
+                document.getElementById('scannerPlaceholder').classList.remove('hidden');
+            }
+        }
+
+        async function switchCameraFacing() {
+            usingRearCamera = !usingRearCamera;
+            await startCamera();
+        }
+
+        function capturePhoto() {
+            const videoEl = document.getElementById('cameraStream');
+            if (!videoEl || !mediaStream) return;
+
+            const canvas = document.getElementById('helperCanvas');
+            canvas.width = videoEl.videoWidth || 1280;
+            canvas.height = videoEl.videoHeight || 960;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+            setPreviewImage(dataUrl, 'image/jpeg');
+            stopCamera();
+            showToast("Foto aufgenommen! Klicke unten auf Scannen.");
+        }
+
+        function handleImageUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            readFileAsDataUrl(file);
+        }
+
+        function readFileAsDataUrl(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const dataUrl = e.target.result;
+                const mime = file.type || 'image/png';
+                setPreviewImage(dataUrl, mime);
+                stopCamera();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function setPreviewImage(dataUrl, mimeType = 'image/png') {
+            currentImageMimeType = mimeType;
+            currentImageBase64 = dataUrl.split(',')[1];
+
+            const imgEl = document.getElementById('imagePreview');
+            imgEl.src = dataUrl;
+            imgEl.classList.remove('hidden');
+
+            document.getElementById('scannerPlaceholder').classList.add('hidden');
+            document.getElementById('btnRotateImage').classList.remove('hidden');
+            document.getElementById('btnScanNow').disabled = false;
+        }
+
+        function rotateCurrentImage() {
+            if (!currentImageBase64) return;
+            const img = new Image();
+            img.onload = function () {
+                const canvas = document.getElementById('helperCanvas');
+                canvas.width = img.height;
+                canvas.height = img.width;
+                const ctx = canvas.getContext('2d');
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.rotate(Math.PI / 2);
+                ctx.drawImage(img, -img.width / 2, -img.height / 2);
+                const rotatedDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+                setPreviewImage(rotatedDataUrl, 'image/jpeg');
+            };
+            img.src = `data:${currentImageMimeType};base64,${currentImageBase64}`;
+        }
+
+        function setupPasteAndDropListeners() {
+            window.addEventListener('paste', (e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (const item of items) {
+                    if (item.type.indexOf('image') !== -1) {
+                        const file = item.getAsFile();
+                        if (file) {
+                            switchTab('scan');
+                            readFileAsDataUrl(file);
+                            showToast("Bild eingefügt!");
+                        }
+                    }
+                }
+            });
+
+            const dropZone = document.getElementById('dropZone');
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-indigo-400');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-indigo-400');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-indigo-400');
+                const file = e.dataTransfer?.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                    readFileAsDataUrl(file);
+                }
+            });
+        }
+
+        // ==========================================
+        // KI & LOKALER SCANNER
+        // ==========================================
+        async function fetchWithRetry(url, options, maxRetries = 4) {
+            let delay = 1000;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return await response.json();
+                    }
+                    if (response.status !== 429 && response.status < 500) {
+                        const errBody = await response.text();
+                        throw new Error(`API Status ${response.status}: ${errBody}`);
+                    }
+                } catch (err) {
+                    if (attempt === maxRetries - 1) throw err;
+                }
+                await new Promise(r => setTimeout(r, delay));
+                delay *= 2;
+            }
+        }
+
+        async function scanHomeworkImage() {
+            if (!currentImageBase64) {
+                showToast("Bitte zuerst ein Foto aufnehmen oder wählen!", true);
+                return;
+            }
+
+            const engine = document.getElementById('engineSelect').value;
+            const scanBtn = document.getElementById('btnScanNow');
+            const laser = document.getElementById('scanLaser');
+            const statusBox = document.getElementById('scanStatusBox');
+            const statusText = document.getElementById('scanStatusText');
+
+            scanBtn.disabled = true;
+            laser.classList.remove('hidden');
+            statusBox.classList.remove('hidden');
+
+            try {
+                let extractedItems = [];
+
+                if (engine === 'gemini') {
+                    statusText.textContent = 'KI liest deine Handschrift und ordnet die Fächer zu...';
+                    try {
+                        extractedItems = await scanWithGeminiVision();
+                    } catch (geminiErr) {
+                        console.warn("Gemini Fallback auf lokale OCR:", geminiErr);
+                        statusText.textContent = 'Wechsle automatisch auf lokalen Offline-Scanner...';
+                        extractedItems = await scanWithLocalTesseract();
+                    }
+                } else {
+                    statusText.textContent = 'Lokaler Scanner liest dein Hausiheft...';
+                    extractedItems = await scanWithLocalTesseract();
+                }
+
+                if (!extractedItems || extractedItems.length === 0) {
+                    showToast("Keine Aufgaben erkannt. Bitte Foto etwas näher aufnehmen.", true);
+                    return;
+                }
+
+                const normalized = extractedItems
+                    .map(item => ({
+                        subject: cleanSubjectName(item.subject),
+                        task: (item.task || '').trim()
+                    }))
+                    .filter(item => item.subject || item.task);
+
+                const newTodoObjects = normalized.map((item, idx) => ({
+                    id: 'hw-' + Date.now() + '-' + idx,
+                    subject: item.subject || 'Aufgabe',
+                    task: item.task,
+                    done: false
+                }));
+
+                todos = [...newTodoObjects, ...todos];
+                saveTodosToStorage();
+                renderTodos();
+                updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+
+                showToast(`${normalized.length} Hausaufgaben erfolgreich gescannt!`);
+                // Automatisch zum formatierten Text wechseln, damit man das Ergebnis sofort sieht
+                switchTab('text');
+            } catch (error) {
+                console.error("Scan error:", error);
+                showToast("Scannen fehlgeschlagen. Bitte versuche es erneut.", true);
+            } finally {
+                scanBtn.disabled = false;
+                laser.classList.add('hidden');
+                statusBox.classList.add('hidden');
+            }
+        }
+
+        async function scanWithGeminiVision() {
+            const savedUserKey = (localStorage.getItem('hausiheft_user_apikey') || '').trim();
+            const activeKey = savedUserKey || apiKey;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${activeKey}`;
+
+            const subjectRules = document.getElementById('subjectMapInput').value || DEFAULT_SUBJECT_MAP;
+
+            const promptText = `Du bist ein präziser deutscher Hausaufgabenscanner für ein handgeschriebenes Hausaufgabenheft ("Hausiheft").
+Lies alle Hausaufgaben-Einträge aus dem Bild aus.
+WICHTIGE REGELN:
+1. Trenne jede Hausaufgabe in "subject" (das ausgeschriebene Schulfach OHNE Doppelpunkt, z.B. "Mathe", "Deutsch", "Englisch") und "task" (den genauen Aufgaben-Text dahinter).
+2. Wandle alle Fächer-Abkürzungen automatisch in den vollen Fachnamen um anhand dieser Liste: ${subjectRules}.
+3. Ignoriere vorgedruckte Datumsfelder oder Wochentage, sofern sie nicht Teil der Hausaufgabe sind.
+4. Behalte Seitenzahlen (z.B. S. 42), Nummern (z.B. Nr. 1-4) und Vokabelangaben exakt bei.`;
+
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: promptText },
+                            {
+                                inlineData: {
+                                    mimeType: currentImageMimeType,
+                                    data: currentImageBase64
+                                }
+                            }
+                        ]
+                    }
+                ],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                subject: { type: "STRING" },
+                                task: { type: "STRING" }
+                            },
+                            propertyOrdering: ["subject", "task"]
+                        }
+                    }
+                }
+            };
+
+            const result = await fetchWithRetry(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const jsonText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!jsonText) {
+                throw new Error("Keine gültige Antwort erhalten.");
+            }
+            return JSON.parse(jsonText);
+        }
+
+        async function scanWithLocalTesseract() {
+            const imgSrc = `data:${currentImageMimeType};base64,${currentImageBase64}`;
+            const worker = await Tesseract.createWorker('deu');
+            const ret = await worker.recognize(imgSrc);
+            await worker.terminate();
+
+            const rawText = ret?.data?.text || '';
+            return parseRawTextIntoHomeworkItems(rawText);
+        }
+
+        function parseRawTextIntoHomeworkItems(rawText) {
+            const lines = rawText
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l.length > 2 && !/^hausaufgaben/i.test(l));
+
+            const results = [];
+            for (const line of lines) {
+                const colonMatch = line.match(/^([A-Za-zÄÖÜäöüß\.]{1,18})\s*[:\-–|]\s*(.+)$/);
+                if (colonMatch) {
+                    results.push({
+                        subject: cleanSubjectName(colonMatch[1]),
+                        task: colonMatch[2].trim()
+                    });
+                } else {
+                    const words = line.split(/\s+/);
+                    const firstWordClean = words[0].replace(/[^A-Za-zÄÖÜäöüß]/g, '');
+                    const mapped = mapAbbreviationToSubject(firstWordClean);
+                    if (mapped && words.length > 1) {
+                        results.push({
+                            subject: mapped,
+                            task: words.slice(1).join(' ')
+                        });
+                    } else {
+                        results.push({
+                            subject: 'Aufgabe',
+                            task: line
+                        });
+                    }
+                }
+            }
+            return results;
+        }
+
+        function mapAbbreviationToSubject(rawAbbr) {
+            if (!rawAbbr) return null;
+            const mapStr = document.getElementById('subjectMapInput')?.value || DEFAULT_SUBJECT_MAP;
+            const pairs = mapStr.split(',');
+            const cleanedInput = rawAbbr.replace(/\./g, '').trim().toLowerCase();
+
+            for (const pair of pairs) {
+                const [k, v] = pair.split('=').map(s => s?.trim());
+                if (k && v && k.toLowerCase() === cleanedInput) {
+                    return v;
+                }
+                if (v && v.toLowerCase() === cleanedInput) {
+                    return v;
+                }
+            }
+            return null;
+        }
+
+        function cleanSubjectName(rawSubject) {
+            if (!rawSubject) return 'Aufgabe';
+            let cleaned = rawSubject.replace(/[:\-–|.]+$/g, '').trim();
+            const mapped = mapAbbreviationToSubject(cleaned);
+            return mapped || cleaned;
+        }
+
+        // ==========================================
+        // FORMATIERTER HAUSI-TEXT (Fach: fett + Leerzeichen + Text)
+        // ==========================================
+        function updateFormattedOutputFromTodos(items) {
+            const box = document.getElementById('formattedOutputBox');
+            if (!items || items.length === 0) {
+                // Komplett leer lassen, damit der CSS data-placeholder greift und nichts herausgelöscht werden muss
+                box.innerHTML = '';
+                return;
+            }
+
+            const htmlLines = items.map(item => {
+                const safeSubj = escapeHtml(cleanSubjectName(item.subject));
+                const safeTask = escapeHtml(item.task);
+                return `<div><strong class="font-bold text-white">${safeSubj}:</strong> <span>${safeTask}</span></div>`;
+            });
+
+            box.innerHTML = htmlLines.join('');
+        }
+
+        // Wenn man im Textfeld etwas ausbessert, wird die To-Do-Liste synchron gehalten
+        function syncEditedTextToTodos() {
+            const box = document.getElementById('formattedOutputBox');
+            const textLines = box.innerText
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(Boolean);
+
+            if (textLines.length === 0) return;
+
+            const doneTodos = todos.filter(t => t.done);
+            const updatedOpenTodos = textLines.map((line, idx) => {
+                const colonIdx = line.indexOf(':');
+                if (colonIdx !== -1) {
+                    return {
+                        id: 'edit-' + idx,
+                        subject: cleanSubjectName(line.slice(0, colonIdx)),
+                        task: line.slice(colonIdx + 1).trim(),
+                        done: false
+                    };
+                }
+                return {
+                    id: 'edit-' + idx,
+                    subject: 'Aufgabe',
+                    task: line,
+                    done: false
+                };
+            });
+
+            todos = [...updatedOpenTodos, ...doneTodos];
+            saveTodosToStorage();
+            renderTodos();
+        }
+
+        function clearFormattedText() {
+            const box = document.getElementById('formattedOutputBox');
+            box.innerHTML = '';
+            // Offene Aufgaben ebenfalls leeren, damit alles synchron bleibt
+            todos = todos.filter(t => t.done);
+            saveTodosToStorage();
+            renderTodos();
+            showToast("Textfeld geleert!");
+        }
+
+        function copyFormattedText() {
+            const box = document.getElementById('formattedOutputBox');
+            const rawLines = box.innerText
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(Boolean);
+
+            if (rawLines.length === 0) {
+                showToast("Noch kein Text zum Kopieren vorhanden!", true);
+                return;
+            }
+
+            const plainLines = [];
+            const htmlLines = [];
+
+            rawLines.forEach(line => {
+                const colonIndex = line.indexOf(':');
+                if (colonIndex !== -1) {
+                    const subj = cleanSubjectName(line.slice(0, colonIndex));
+                    const rest = line.slice(colonIndex + 1).trim();
+                    plainLines.push(`${subj}: ${rest}`);
+                    htmlLines.push(`<b>${escapeHtml(subj)}:</b> ${escapeHtml(rest)}`);
+                } else {
+                    plainLines.push(line);
+                    htmlLines.push(escapeHtml(line));
+                }
+            });
+
+            copyRichAndPlain(htmlLines.join('<br>'), plainLines.join('\n'));
+            showToast("Hausi-Text kopiert!");
+        }
+
+        function copyRichAndPlain(htmlContent, plainContent) {
+            const tempEl = document.createElement('div');
+            tempEl.innerHTML = htmlContent;
+            tempEl.style.position = 'fixed';
+            tempEl.style.left = '-9999px';
+            tempEl.style.top = '0';
+            document.body.appendChild(tempEl);
+
+            const range = document.createRange();
+            range.selectNodeContents(tempEl);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            try {
+                document.execCommand('copy');
+            } catch (err) {
+                copyTextFallback(plainContent);
+            }
+
+            selection.removeAllRanges();
+            document.body.removeChild(tempEl);
+        }
+
+        function copyTextFallback(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
+
+        // ==========================================
+        // TO-DO-LISTE VERWALTUNG
+        // ==========================================
+        function renderTodos() {
+            const container = document.getElementById('todoListContainer');
+            const badge = document.getElementById('todoCounterBadge');
+            const navBadge = document.getElementById('navTodoBadge');
+
+            const openCount = todos.filter(t => !t.done).length;
+            badge.textContent = `${openCount} offen`;
+
+            if (openCount > 0) {
+                navBadge.textContent = openCount;
+                navBadge.classList.remove('hidden');
+            } else {
+                navBadge.classList.add('hidden');
+            }
+
+            if (todos.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 px-4 rounded-xl bg-slate-950/50 border border-slate-800/80 text-slate-400 text-xs sm:text-sm">
+                        Deine To-Do-Liste ist leer.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = todos.map(todo => {
+                const subj = escapeHtml(cleanSubjectName(todo.subject));
+                const task = escapeHtml(todo.task);
+
+                // Bearbeitungs-Modus für genau diese Aufgabe
+                if (editingTodoId === todo.id) {
+                    return `
+                        <div class="p-3.5 rounded-xl border border-indigo-500 bg-slate-900/95 space-y-2.5 shadow-lg">
+                            <div class="flex items-center justify-between text-xs text-indigo-300 font-bold">
+                                <span><i class="fa-solid fa-pen mr-1"></i>Aufgabe bearbeiten</span>
+                                <span class="text-[11px] text-slate-400 font-normal">Kürzel (z.B. M, D, E) werden automatisch ausgeschrieben</span>
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input id="edit-subj-${todo.id}" type="text" value="${subj}" placeholder="Fach / Kürzel"
+                                       onkeydown="handleEditKeydown(event, '${todo.id}')"
+                                       class="sm:w-40 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm font-bold text-white focus:outline-none focus:border-indigo-500">
+                                <input id="edit-task-${todo.id}" type="text" value="${task}" placeholder="Aufgabe..."
+                                       onkeydown="handleEditKeydown(event, '${todo.id}')"
+                                       class="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-1">
+                                <button onclick="cancelEditTodo()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+                                    Abbrechen
+                                </button>
+                                <button onclick="saveEditTodo('${todo.id}')" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5">
+                                    <i class="fa-solid fa-check"></i>
+                                    <span>Speichern</span>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                // Normaler Anzeige-Modus
+                return `
+                    <div class="group flex items-start justify-between gap-3 p-3.5 rounded-xl border transition ${
+                        todo.done
+                            ? 'bg-slate-950/40 border-slate-800/60 opacity-60'
+                            : 'bg-slate-900/90 border-slate-800 hover:border-indigo-500/40'
+                    }">
+                        <label class="flex items-start gap-3 cursor-pointer flex-1 select-none" ondblclick="startEditTodo('${todo.id}')">
+                            <input type="checkbox" ${todo.done ? 'checked' : ''} onchange="toggleTodo('${todo.id}')"
+                                   class="mt-1 w-4 h-4 rounded border-slate-600 text-indigo-600 focus:ring-indigo-500 bg-slate-950 cursor-pointer">
+                            <div class="text-sm sm:text-base leading-snug ${todo.done ? 'line-through text-slate-400' : 'text-slate-100'}">
+                                <strong class="font-bold text-white">${subj}:</strong> <span>${task}</span>
+                            </div>
+                        </label>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <button onclick="startEditTodo('${todo.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition" title="Aufgabe bearbeiten">
+                                <i class="fa-solid fa-pen text-xs"></i>
+                            </button>
+                            <button onclick="copySingleTodo('${todo.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition" title="Aufgabe kopieren">
+                                <i class="fa-regular fa-copy text-xs"></i>
+                            </button>
+                            <button onclick="deleteTodo('${todo.id}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition" title="Löschen">
+                                <i class="fa-solid fa-trash-can text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function startEditTodo(id) {
+            editingTodoId = id;
+            renderTodos();
+            setTimeout(() => {
+                const taskInput = document.getElementById('edit-task-' + id);
+                if (taskInput) {
+                    taskInput.focus();
+                    taskInput.setSelectionRange(taskInput.value.length, taskInput.value.length);
+                }
+            }, 20);
+        }
+
+        function cancelEditTodo() {
+            editingTodoId = null;
+            renderTodos();
+        }
+
+        function saveEditTodo(id) {
+            const subjInput = document.getElementById('edit-subj-' + id);
+            const taskInput = document.getElementById('edit-task-' + id);
+            if (!subjInput || !taskInput) return;
+
+            const newSubject = cleanSubjectName(subjInput.value) || 'Aufgabe';
+            const newTask = taskInput.value.trim();
+
+            if (!newTask) {
+                showToast("Aufgaben-Text darf nicht leer sein!", true);
+                return;
+            }
+
+            todos = todos.map(t => t.id === id ? { ...t, subject: newSubject, task: newTask } : t);
+            editingTodoId = null;
+
+            saveTodosToStorage();
+            renderTodos();
+            updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+            showToast("Aufgabe aktualisiert!");
+        }
+
+        function handleEditKeydown(event, id) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                saveEditTodo(id);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                cancelEditTodo();
+            }
+        }
+
+        function handleManualAdd(e) {
+            e.preventDefault();
+            const subjInput = document.getElementById('manualSubject');
+            const taskInput = document.getElementById('manualTask');
+
+            const subject = cleanSubjectName(subjInput.value);
+            const task = taskInput.value.trim();
+            if (!subject || !task) return;
+
+            todos.unshift({
+                id: 'manual-' + Date.now(),
+                subject,
+                task,
+                done: false
+            });
+
+            subjInput.value = '';
+            taskInput.value = '';
+
+            saveTodosToStorage();
+            renderTodos();
+            updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+            showToast(`${subject}: hinzugefügt!`);
+        }
+
+        function toggleTodo(id) {
+            todos = todos.map(t => t.id === id ? { ...t, done: !t.done } : t);
+            saveTodosToStorage();
+            renderTodos();
+            updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+        }
+
+        function deleteTodo(id) {
+            todos = todos.filter(t => t.id !== id);
+            saveTodosToStorage();
+            renderTodos();
+            updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+        }
+
+        function clearCompletedTodos() {
+            const before = todos.length;
+            todos = todos.filter(t => !t.done);
+            if (todos.length < before) {
+                saveTodosToStorage();
+                renderTodos();
+                updateFormattedOutputFromTodos(todos.filter(t => !t.done));
+                showToast("Erledigte Aufgaben gelöscht!");
+            }
+        }
+
+        function clearAllTodos() {
+            if (todos.length === 0) return;
+            todos = [];
+            saveTodosToStorage();
+            renderTodos();
+            updateFormattedOutputFromTodos([]);
+            showToast("To-Do-Liste komplett geleert!");
+        }
+
+        function copySingleTodo(id) {
+            const item = todos.find(t => t.id === id);
+            if (!item) return;
+            const subj = cleanSubjectName(item.subject);
+            const html = `<b>${escapeHtml(subj)}:</b> ${escapeHtml(item.task)}`;
+            const plain = `${subj}: ${item.task}`;
+            copyRichAndPlain(html, plain);
+            showToast(`"${subj}:" kopiert!`);
+        }
+
+        function saveTodosToStorage() {
+            try {
+                localStorage.setItem('hausiheft_todos_clean_v2', JSON.stringify(todos));
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // ==========================================
+        // HILFSFUNKTIONEN
+        // ==========================================
+        function openModal(id) {
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        let toastTimeout = null;
+        function showToast(message, isWarning = false) {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            const msgEl = document.getElementById('toastMessage');
+
+            msgEl.textContent = message;
+            if (isWarning) {
+                icon.className = 'fa-solid fa-circle-exclamation text-amber-400 text-base';
+            } else {
+                icon.className = 'fa-solid fa-circle-check text-emerald-400 text-base';
+            }
+
+            toast.classList.remove('hidden', 'translate-y-2', 'opacity-0');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.classList.add('hidden'), 300);
+            }, 2800);
+        }
+
+        function escapeHtml(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+
+</body></html>
